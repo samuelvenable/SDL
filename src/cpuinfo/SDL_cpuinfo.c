@@ -40,6 +40,17 @@
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #endif
+#if defined(SDL_PLATFORM_MACOS)
+#include <mach/mach.h>
+#elif defined(SDL_PLATFORM_NETBSD)
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <uvm/uvm_extern.h>
+#elif defined(SDL_PLATFORM_OPENBSD)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <uvm/uvmexp.h>
+#endif
 #if defined(SDL_PLATFORM_MACOS) && (defined(__ppc__) || defined(__ppc64__))
 #include <sys/sysctl.h> // For AltiVec check
 #elif defined(SDL_PLATFORM_OPENBSD) && defined(__powerpc__) && !defined(HAVE_ELF_AUX_INFO)
@@ -1239,6 +1250,89 @@ int SDL_GetSystemRAM(void)
     return SDL_SystemRAM;
 }
 
+int SDL_GetFreeRAM(void)
+{
+#if defined(SDL_PLATFORM_LINUX)
+    long free_ram = 0;
+    int fd = open("/proc/meminfo", O_RDONLY);
+    if (fd != -1) {
+        char buf[BUFSIZ];
+        ssize_t len = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (len > 0) {
+            buf[len] = '\0';
+            char *pos = strstr(buf, "MemFree:");
+            if (pos) {
+                if (sscanf(pos, "MemFree: %ld kB", &free_ram) == 1) {
+                    free_ram /= 1024;
+                }
+            }
+        }
+    }
+    return (int)free_ram;
+#elif defined(HAVE_SYSCONF) && defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
+    return (int)((Sint64)sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE) / (1024 * 1024));
+#elif defined(SDL_PLATFORM_FREEBSD)
+    int free_ram = 0;
+    Uint64 buf = 0;
+    size_t len = sizeof(buf);
+    if (sysctlbyname("vm.stats.vm.v_free_count", &buf, &len, NULL, 0) == 0) {
+        free_ram = (int)((Sint64)buf * sysconf(_SC_PAGESIZE) / (1024 * 1024));
+    }
+    return free_ram;
+#elif defined(SDL_PLATFORM_NETBSD)
+    int free_ram = 0;
+    struct uvmexp_sysctl buf;
+    size_t len = sizeof(buf);
+    int mib[2] = { CTL_VM, VM_UVMEXP2 };
+    if (sysctl(mib, 2, &buf, &len, NULL, 0) == 0) {
+        free_ram = (int)((Sint64)buf.free * sysconf(_SC_PAGESIZE) / (1024 * 1024));
+    }
+    return free_ram;
+#elif defined(SDL_PLATFORM_OPENBSD)
+    int free_ram = 0;
+    struct uvmexp buf;
+    size_t len = sizeof(buf);
+    int mib[2] = { CTL_VM, VM_UVMEXP };
+    if (sysctl(mib, 2, &buf, &len, NULL, 0) == 0) {
+        free_ram = (int)((Sint64)buf.free * sysconf(_SC_PAGESIZE) / (1024 * 1024));
+    }
+    return free_ram;
+#elif defined(SDL_PLATFORM_MACOS)
+    int free_ram = 0;
+    vm_statistics64_data_t buf;
+    mach_msg_type_number_t len = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t)&buf, &len) == KERN_SUCCESS) {
+        free_ram = (int)((Sint64)(((buf.free_count - buf.speculative_count) + buf.external_page_count) * sysconf(_SC_PAGESIZE) / (1024 * 1024)));
+    }
+    return free_ram;
+#elif defined(SDL_PLATFORM_WINDOWS)
+    int free_ram = 0;
+    MEMORYSTATUSEX buf;
+    buf.dwLength = sizeof(buf);
+    if (GlobalMemoryStatusEx(&buf)) {
+        free_ram = (int)((Sint64)buf.ullAvailPhys / (1024 * 1024));
+    }
+    return free_ram;
+#else
+    SDL_SetError("Not implemented");
+    return 0;
+#endif
+}
+
+int SDL_GetUsedRAM(void)
+{
+#if defined(SDL_PLATFORM_LINUX) || (defined(HAVE_SYSCONF) && \
+        defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)) || \
+        defined(SDL_PLATFORM_FREEBSD) || defined(SDL_PLATFORM_NETBSD) || \
+        defined(SDL_PLATFORM_OPENBSD) || defined(SDL_PLATFORM_MACOS) || \
+        defined(SDL_PLATFORM_WINDOWS)
+    return SDL_GetSystemRAM() - SDL_GetFreeRAM();
+#else
+    SDL_SetError("Not implemented");
+    return 0;
+#endif
+}
 
 static int SDL_SystemPageSize = -1;
 

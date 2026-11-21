@@ -1193,9 +1193,9 @@ static GamepadMapping_t *SDL_CreateMappingForHIDAPIGamepad(SDL_GUID guid)
             const bool map_nunchuck_left_side = true;
 
             if (map_nunchuck_left_side) {
-                SDL_strlcat(mapping_string, "a:b0,b:b1,back:b4,dpdown:b12,dpleft:b13,dpright:b14,dpup:b11,guide:b5,leftshoulder:b9,lefttrigger:a4,leftx:a0,lefty:a1,start:b6,x:b2,y:b3,", sizeof(mapping_string));
+                SDL_strlcat(mapping_string, "a:b0,b:b1,back:b4,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b5,leftshoulder:b9,lefttrigger:a4,leftx:a0,lefty:a1,start:b6,x:b2,y:b3,", sizeof(mapping_string));
             } else {
-                SDL_strlcat(mapping_string, "a:b0,b:b1,back:b4,dpdown:b12,dpleft:b13,dpright:b14,dpup:b11,guide:b5,rightshoulder:b9,righttrigger:a4,rightx:a0,righty:a1,start:b6,x:b2,y:b3,", sizeof(mapping_string));
+                SDL_strlcat(mapping_string, "a:b0,b:b1,back:b4,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b5,rightshoulder:b9,righttrigger:a4,rightx:a0,righty:a1,start:b6,x:b2,y:b3,", sizeof(mapping_string));
             }
         } break;
         default:
@@ -1449,13 +1449,27 @@ static GamepadMapping_t *SDL_PrivateGetGamepadMappingForGUID(SDL_GUID guid, bool
         return mapping;
     }
 
-#ifdef SDL_JOYSTICK_IOKIT
-    // IOKit used to report Bluetooth gamepads on the USB bus, so fall back to existing mappings for those
+#if defined(SDL_JOYSTICK_IOKIT) || defined(SDL_JOYSTICK_DINPUT)
+    // IOKit and DirectInput used to report Bluetooth gamepads on the USB bus, so fall back to existing mappings for those
     if (SDL_GetJoystickGUIDBus(guid) == SDL_HARDWARE_BUS_BLUETOOTH && guid.data[14] == 0) {
         SDL_GUID usb_guid = guid;
 
         SDL_SetJoystickGUIDBus(&usb_guid, SDL_HARDWARE_BUS_USB);
         mapping = SDL_PrivateFindGamepadMappingForGUID(usb_guid);
+        if (mapping) {
+            return mapping;
+        }
+    }
+#endif
+
+#ifdef SDL_JOYSTICK_ANDROID
+    // Android used to report all gamepads on the Bluetooth bus, so fall back to existing mappings for those
+    if (SDL_GetJoystickGUIDBus(guid) == SDL_HARDWARE_BUS_USB &&
+        !SDL_IsJoystickHIDAPI(guid) && !SDL_IsJoystickVIRTUAL(guid)) {
+        SDL_GUID bluetooth_guid = guid;
+
+        SDL_SetJoystickGUIDBus(&bluetooth_guid, SDL_HARDWARE_BUS_BLUETOOTH);
+        mapping = SDL_PrivateFindGamepadMappingForGUID(bluetooth_guid);
         if (mapping) {
             return mapping;
         }
